@@ -479,12 +479,14 @@ static BOOL IsPathWritable(NSString *path);
 			NSString *desktop=[NSSearchPathForDirectoriesInDomains(
 			NSDesktopDirectory,NSUserDomainMask,YES) objectAtIndex:0];
 			[archive setDestination:desktop];
+			[[archive taskView] setupWaitView];
 			[self checkDestinationForArchiveController:archive];
 		}
 		break;
 
 		case 2: // Elsewhere.
 			[archive setDestination:nil];
+			[[archive taskView] setupWaitView];
 			[self checkDestinationForArchiveController:archive];
 		break;
 	}
