@@ -55,9 +55,9 @@
 -(void)actuallyAddArchiveController:(TUArchiveController *)archive;
 -(TUArchiveController *)archiveControllerForFilename:(NSString *)filename;
 
+-(void)findDestinationForArchiveController:(TUArchiveController *)archive;
+-(void)gainAccessToDestinationForArchiveController:(TUArchiveController *)archive;
 -(void)checkDestinationForArchiveController:(TUArchiveController *)archive;
--(void)checkDestinationForArchiveControllerAgain:(TUArchiveController *)archive;
--(void)checkDestinationForArchiveController:(TUArchiveController *)archive secondAttempt:(BOOL)secondattempt;
 -(void)archiveDestinationPanelDidEnd:(NSOpenPanel *)panel returnCode:(int)res contextInfo:(void  *)info;
 -(void)archiveTaskView:(TUArchiveTaskView *)taskview notWritableResponse:(int)response;
 -(void)prepareArchiveController:(TUArchiveController *)archive;

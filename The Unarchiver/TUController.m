@@ -298,7 +298,7 @@ static BOOL IsPathWritable(NSString *path);
 	[NSApp activateIgnoringOtherApps:YES];
 	[mainwindow makeKeyAndOrderFront:nil];
 
-	[self checkDestinationForArchiveController:archive];
+	[self findDestinationForArchiveController:archive];
 }
 
 -(TUArchiveController *)archiveControllerForFilename:(NSString *)filename
@@ -314,17 +314,7 @@ static BOOL IsPathWritable(NSString *path);
 	return nil;
 }
 
--(void)checkDestinationForArchiveController:(TUArchiveController *)archive
-{
-	[self checkDestinationForArchiveController:archive secondAttempt:NO];
-}
-
--(void)checkDestinationForArchiveControllerAgain:(TUArchiveController *)archive
-{
-	[self checkDestinationForArchiveController:archive secondAttempt:YES];
-}
-
--(void)checkDestinationForArchiveController:(TUArchiveController *)archive secondAttempt:(BOOL)secondattempt
+-(void)findDestinationForArchiveController:(TUArchiveController *)archive
 {
 	NSString *destination=[archive destination];
 
@@ -341,98 +331,114 @@ static BOOL IsPathWritable(NSString *path);
 		NSString *rememberedpath=[[NSUserDefaults standardUserDefaults] stringForKey:@"lastDestination"];
 
 		#ifdef IsLegacyVersion
+
 		if(rememberedpath) [panel setDirectory:rememberedpath];
+
 		[panel beginSheetForDirectory:nil file:nil modalForWindow:mainwindow
 		modalDelegate:self didEndSelector:@selector(archiveDestinationPanelDidEnd:returnCode:contextInfo:)
 		contextInfo:archive];
+
 		#else
+
 		if(rememberedpath) [panel setDirectoryURL:[NSURL fileURLWithPath:rememberedpath]];
+
 		[panel beginSheetModalForWindow:mainwindow completionHandler:^(NSInteger result) {
 			[self archiveDestinationPanelDidEnd:panel returnCode:(int)result contextInfo:archive];
 		}];
+
 		#endif
 
 		return;
+	}
+
+	[self gainAccessToDestinationForArchiveController:archive];
+}
+
+-(void)gainAccessToDestinationForArchiveController:(TUArchiveController *)archive
+{
+	#ifndef UseSandbox
+
+	[self checkDestinationForArchiveController:archive];
+
+	#else
+
+	NSString *destination=[archive destination];
+
+	// Always try to find the directory in our cache of security-scoped URLs.
+	// We may have access to write to it already, but this may only be
+	// because an archive ahead of us in the queue requested it, and will
+	// later give up that right, so we have to make sure we get it for
+	// ourselves too.
+	NSURL *scopedurl=[[CSURLCache defaultCache] securityScopedURLAllowingAccessToPath:destination];
+	if(scopedurl)
+	{
+		// If we do have one, we can just move on.
+		[archive useSecurityScopedURL:scopedurl];
+		[self checkDestinationForArchiveController:archive];
+	}
+	else if(IsPathWritable(destination))
+	{
+		// If we don't, but the destination is writable anyway, just go ahead.
+		[self checkDestinationForArchiveController:archive];
 	}
 	else
 	{
-		#ifdef UseSandbox
-		// On the first attempt to access a given path, try to find a cached
-		// security-scoped URL for this path, and use it, even if we already have
-		// access. (This is to balance the number of starts and stops for the URL.)
-		if(!secondattempt)
+		// If the destination is not writable and we didn't have cached access
+		// to it, open a file panel to get fresh access to the directory.
+		NSOpenPanel *panel=[NSOpenPanel openPanel];
+
+		NSTextField *text=[[[NSTextField alloc] initWithFrame:NSMakeRect(0,0,100,100)] autorelease];
+
+		[text setStringValue:NSLocalizedString(
+		@"The Unarchiver does not have permission to write to this folder. "
+		@"To allow The Unarchiver to write to this folder, simply click "
+		@"\"Extract\". This permission will be remembered for this folder, and "
+		@"The Unarchiver will not need to ask for it again.",
+		@"Informative text in the file panel shown when trying to gain sandbox access")];
+		[text setBezeled:NO];
+		[text setDrawsBackground:NO];
+		[text setEditable:NO];
+		[text setSelectable:NO];
+		[text setFont:[NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:[[text cell] controlSize]]]];
+
+		NSSize size=[[text cell] cellSizeForBounds:NSMakeRect(0,0,460,100000)];
+		[text setFrame:NSMakeRect(0,0,size.width,size.height)];
+
+		[panel setAccessoryView:text];
+		if([panel respondsToSelector:@selector(isAccessoryViewDisclosed)])
 		{
-			NSURL *scopedurl=[[CSURLCache defaultCache] securityScopedURLAllowingAccessToPath:destination];
-			[archive useSecurityScopedURL:scopedurl];
+			[panel setAccessoryViewDisclosed:YES];
 		}
-		#endif
+
+		[panel setCanCreateDirectories:YES];
+		[panel setCanChooseDirectories:YES];
+		[panel setCanChooseFiles:NO];
+		[panel setPrompt:NSLocalizedString(@"Extract",@"Panel OK button title when choosing an unarchiving destination for an archive")];
+		[panel setDirectoryURL:[NSURL fileURLWithPath:destination]];
+
+		[panel beginSheetModalForWindow:mainwindow completionHandler:^(NSInteger result) {
+			[self archiveDestinationPanelDidEnd:panel returnCode:(int)result contextInfo:archive];
+		}];
 	}
 
-	if(!IsPathWritable(destination))
-	{
-		#ifndef UseSandbox
+	#endif
+}
 
+-(void)checkDestinationForArchiveController:(TUArchiveController *)archive
+{
+	NSString *destination=[archive destination];
+
+	if(IsPathWritable(destination))
+	{
+		// Continue the setup process by trying to initialize the unarchiver,
+		// and handle getting access from the sandbox to scan for volume files.
+		[self prepareArchiveController:archive];
+	}
+	else
+	{
 		// Can not write to the given destination. Show an error.
 		[[archive taskView] displayNotWritableErrorWithResponseAction:@selector(archiveTaskView:notWritableResponse:) target:self];
-		return;
-
-		#else
-
-		// Can not write to the given destination. Open a file
-		// panel to get sandbox access to the directory, or show an error
-		// if a file panel was already shown.
-		if(!IsPathWritable(destination))
-		{
-			if(secondattempt)
-			{
-				[[archive taskView] displayNotWritableErrorWithResponseAction:@selector(archiveTaskView:notWritableResponse:) target:self];
-			}
-			else
-			{
-				NSOpenPanel *panel=[NSOpenPanel openPanel];
-
-				NSTextField *text=[[[NSTextField alloc] initWithFrame:NSMakeRect(0,0,100,100)] autorelease];
-
-				[text setStringValue:NSLocalizedString(
-				@"The Unarchiver does not have permission to write to this folder. "
-				@"To allow The Unarchiver to write to this folder, simply click "
-				@"\"Extract\". This permission will be remembered for this folder, and "
-				@"The Unarchiver will not need to ask for it again.",
-				@"Informative text in the file panel shown when trying to gain sandbox access")];
-				[text setBezeled:NO];
-				[text setDrawsBackground:NO];
-				[text setEditable:NO];
-				[text setSelectable:NO];
-				[text setFont:[NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:[[text cell] controlSize]]]];
-
-				NSSize size=[[text cell] cellSizeForBounds:NSMakeRect(0,0,460,100000)];
-				[text setFrame:NSMakeRect(0,0,size.width,size.height)];
-
-				[panel setAccessoryView:text];
-				if([panel respondsToSelector:@selector(isAccessoryViewDisclosed)])
-				{
-					[panel setAccessoryViewDisclosed:YES];
-				}
-
-				[panel setCanCreateDirectories:YES];
-				[panel setCanChooseDirectories:YES];
-				[panel setCanChooseFiles:NO];
-				[panel setPrompt:NSLocalizedString(@"Extract",@"Panel OK button title when choosing an unarchiving destination for an archive")];
-				[panel setDirectoryURL:[NSURL fileURLWithPath:destination]];
-
-				[panel beginSheetModalForWindow:mainwindow completionHandler:^(NSInteger result) {
-					[self archiveDestinationPanelDidEnd:panel returnCode:(int)result contextInfo:archive];
-				}];
-			}
-			return;
-		}
-
-		#endif
 	}
-
-	// Continue the setup process by trying to initialize the unarchiver,
-	// and handle getting access from the sandbox to scan for volume files.
-	[self prepareArchiveController:archive];
 }
 
 -(void)archiveDestinationPanelDidEnd:(NSOpenPanel *)panel returnCode:(int)res contextInfo:(void  *)info
@@ -456,7 +462,7 @@ static BOOL IsPathWritable(NSString *path);
 		[[NSUserDefaults standardUserDefaults] setObject:selecteddestination forKey:@"lastDestination"];
 
 		[archive setDestination:selecteddestination];
-		[self performSelector:@selector(checkDestinationForArchiveControllerAgain:) withObject:archive afterDelay:0];
+		[self performSelector:@selector(checkDestinationForArchiveController:) withObject:archive afterDelay:0];
 	}
 	else
 	{
@@ -480,14 +486,14 @@ static BOOL IsPathWritable(NSString *path);
 			NSDesktopDirectory,NSUserDomainMask,YES) objectAtIndex:0];
 			[archive setDestination:desktop];
 			[[archive taskView] setupWaitView];
-			[self checkDestinationForArchiveController:archive];
+			[self gainAccessToDestinationForArchiveController:archive];
 		}
 		break;
 
 		case 2: // Elsewhere.
 			[archive setDestination:nil];
 			[[archive taskView] setupWaitView];
-			[self checkDestinationForArchiveController:archive];
+			[self findDestinationForArchiveController:archive];
 		break;
 	}
 }
