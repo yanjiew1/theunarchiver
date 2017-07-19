@@ -52,7 +52,7 @@
 -(BOOL)isCancelled;
 -(void)setIsCancelled:(BOOL)iscancelled;
 
-#ifndef IsLegacyVersion
+#ifdef UseSandbox
 -(void)useSecurityScopedURL:(NSURL *)url;
 #endif
 
