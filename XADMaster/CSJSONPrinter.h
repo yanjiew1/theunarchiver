@@ -8,6 +8,7 @@
 	BOOL asciimode;
 
 	BOOL needseparator;
+	NSArray *excludedKeys;
 }
 
 -(id)init;
@@ -15,6 +16,7 @@
 
 -(void)setIndentString:(NSString *)string;
 -(void)setASCIIMode:(BOOL)ascii;
+-(void)setExcludedKeys:(NSArray*)keysToExclude;
 
 -(void)printObject:(id)object;
 
